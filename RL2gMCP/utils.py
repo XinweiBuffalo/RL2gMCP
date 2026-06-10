@@ -39,6 +39,9 @@ class Hyperparameters:
     W_PSR: float = 10.0
     W_SAP: float = 1.0
 
+    # Settings for the "lexicographic" reward type (Approach 5)
+    LEXI_M: float = 100.0
+
     # ==========================================================================
     # III. P-value Simulation Settings
     # ==========================================================================
