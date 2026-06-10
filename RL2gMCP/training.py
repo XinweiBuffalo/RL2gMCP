@@ -89,6 +89,10 @@ def calculate_learning_reward(config, decisions_batch, W_scaled, primary_mask, W
     if config.REWARD_TYPE == "psr":
         penalty = config.PSR_PENALTY if metrics['psr'] < config.PSR_THRESHOLD else 0.0
         learning_reward = (config.W_PSR * metrics['psr']) + (config.W_SAP * metrics['sap']) - penalty
+    elif config.REWARD_TYPE == "lexicographic":
+        # Approach 5: R = M * min(PSR, t_P) + SAP
+        capped_psr = min(metrics['psr'], config.PSR_THRESHOLD)
+        learning_reward = config.LEXI_M * capped_psr + metrics['sap']
     elif config.REWARD_TYPE == "avg_power":
         learning_reward = metrics['avg_reward']
     else:
@@ -119,8 +123,8 @@ def plot_training_dashboard(history: dict, output_path: str | None):
         ax_obj.legend()
         ax_obj.grid(True, which = "both", ls = "-", alpha = 0.5)
 
-    plot_metric(ax[0, 0], history['avg_reward'], 'Avg Reward (Reference)', 'Avg. Scaled Power')
-    plot_metric(ax[0, 1], history['psr'], 'Primary Success Rate (PSR)', 'Success Rate', y_lim = [0, 1.05])
+    plot_metric(ax[0, 0], history['avg_reward'], 'PEP Reward', 'Avg. Scaled Power')
+    plot_metric(ax[0, 1], history['psr'], 'Primary Power ($\\Pi_\\mathcal{P}$)', 'Success Rate', y_lim = [0, 1.05])
     plot_metric(ax[1, 0], history['sap'], 'Secondary Average Power (SAP)', 'Avg. Power', y_lim = [0, 1.05])
     plot_metric(ax[1, 1], history['entropy'], 'Policy Entropy', 'Entropy')
     if len(history['kl_divergence']) > 1:
@@ -228,7 +232,14 @@ def train_agent(
         else:
             reward_baseline = config.BASELINE_DECAY * reward_baseline + (1 - config.BASELINE_DECAY) * learning_reward
         advantage = learning_reward - reward_baseline
-        loss = -log_prob * advantage - config.ENTROPY_COEFF * entropy
+
+        # Entropy coefficient: support annealing via ENTROPY_COEFF_FINAL
+        entropy_coeff_now = config.ENTROPY_COEFF
+        if hasattr(config, 'ENTROPY_COEFF_FINAL') and config.ENTROPY_COEFF_FINAL is not None:
+            frac = episode / max(config.EPISODES - 1, 1)
+            entropy_coeff_now = config.ENTROPY_COEFF * (1 - frac) + config.ENTROPY_COEFF_FINAL * frac
+
+        loss = -log_prob * advantage - entropy_coeff_now * entropy
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
