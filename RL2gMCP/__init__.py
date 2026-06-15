@@ -15,6 +15,16 @@ from .agent import Agent
 from .training import train_agent
 from .evaluation import evaluate_policy, get_final_graph
 from .translateR import plot_final_graph_in_R, plot_final_graph_in_py
+from .workflow import (
+    RLOptimizationConfig,
+    RLGraph,
+    RLOptimizationResult,
+    RLEvaluationResult,
+    run_rl_optimization,
+    run_monte_carlo_evaluation,
+    plot_training_history,
+    plot_graph,
+)
 
 # You can define what `from RL2gMCP import *` will import, which is good practice
 __all__ = [
@@ -27,5 +37,13 @@ __all__ = [
     "evaluate_policy",
     "get_final_graph",
     "plot_final_graph_in_R",
-    "plot_final_graph_in_py"
+    "plot_final_graph_in_py",
+    "RLOptimizationConfig",
+    "RLGraph",
+    "RLOptimizationResult",
+    "RLEvaluationResult",
+    "run_rl_optimization",
+    "run_monte_carlo_evaluation",
+    "plot_training_history",
+    "plot_graph",
 ]
