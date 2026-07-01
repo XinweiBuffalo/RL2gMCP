@@ -69,6 +69,7 @@ class RLOptimizationConfig:
     # P-value simulation settings
     corr_type: str | None = "AR1"
     corr_rho: float | None = 0.6
+    corr_matrix: list[list[float]] | None = None
     alpha0: float = 0.05
 
     # RL training settings
@@ -211,10 +212,29 @@ def _validate_config(config: RLOptimizationConfig) -> int:
         raise ValueError("reward_type must be one of: 'psr', 'lexicographic', 'avg_power'.")
     if config.primary_rule not in {"PRIMARY", "CO_PRIMARY", "DUAL_PRIMARY"}:
         raise ValueError("primary_rule must be one of: 'PRIMARY', 'CO_PRIMARY', 'DUAL_PRIMARY'.")
-    if config.corr_type not in {None, "AR1", "CS"}:
-        raise ValueError("corr_type must be None, 'AR1', or 'CS'.")
-    if config.corr_type is not None and config.corr_rho is None:
+    if config.corr_type not in {None, "AR1", "CS", "CUSTOM"}:
+        raise ValueError("corr_type must be None, 'AR1', 'CS', or 'CUSTOM'.")
+    if config.corr_type in {"AR1", "CS"} and config.corr_rho is None:
         raise ValueError("corr_rho is required when corr_type is 'AR1' or 'CS'.")
+    if config.corr_type == "CUSTOM":
+        if config.corr_matrix is None:
+            raise ValueError("corr_matrix is required when corr_type is 'CUSTOM'.")
+        corr_matrix = np.array(config.corr_matrix, dtype=float)
+        if corr_matrix.shape != (m, m):
+            raise ValueError(f"corr_matrix must have shape {(m, m)}, got {corr_matrix.shape}.")
+        if not np.all(np.isfinite(corr_matrix)):
+            raise ValueError("corr_matrix must contain only finite numeric values.")
+        if not np.allclose(corr_matrix, corr_matrix.T, atol=1e-8):
+            raise ValueError("corr_matrix must be symmetric.")
+        if not np.allclose(np.diag(corr_matrix), np.ones(m), atol=1e-8):
+            raise ValueError("corr_matrix must have ones on the diagonal.")
+        if np.any(corr_matrix < -1.0 - 1e-8) or np.any(corr_matrix > 1.0 + 1e-8):
+            raise ValueError("corr_matrix entries must be between -1 and 1.")
+        min_eigenvalue = float(np.min(np.linalg.eigvalsh(corr_matrix)))
+        if min_eigenvalue < -1e-8:
+            raise ValueError("corr_matrix must be positive semidefinite.")
+    elif config.corr_matrix is not None:
+        raise ValueError("corr_matrix can only be provided when corr_type is 'CUSTOM'.")
 
     alpha_fix = _none_to_nan_array(config.alpha_weight_fix, (m,), "alpha_weight_fix")
     if alpha_fix is not None:
@@ -250,6 +270,7 @@ def _runtime_config(config: RLOptimizationConfig) -> SimpleNamespace:
         LEXI_M=config.lexi_m,
         CORR_TYPE=config.corr_type,
         CORR_RHO=config.corr_rho,
+        CORR_MATRIX=np.array(config.corr_matrix, dtype=float) if config.corr_matrix is not None else None,
         ALPHA_0=config.alpha0,
         LEARNING_RATE=config.learning_rate,
         EPISODES=config.episodes,
@@ -270,6 +291,14 @@ def _runtime_config(config: RLOptimizationConfig) -> SimpleNamespace:
         ALPHA_WEIGHT_FIX=_none_to_nan_array(config.alpha_weight_fix, (len(config.marginal_power),), "alpha_weight_fix"),
         T_FIX=_none_to_nan_array(config.t_fix, (len(config.marginal_power), len(config.marginal_power)), "t_fix"),
     )
+
+
+def _covariance_matrix_from_config(*, m: int, corr_type: str | None, corr_rho: float | None, corr_matrix: np.ndarray | None) -> np.ndarray:
+    if corr_type == "CUSTOM":
+        if corr_matrix is None:
+            raise ValueError("corr_matrix is required when corr_type is 'CUSTOM'.")
+        return corr_matrix
+    return gMCP.create_covariance_matrix(m=m, corr_type=corr_type, rho=corr_rho)
 
 
 def _learning_reward_from_summary(config: RLOptimizationConfig, psr: float, sap: float, avg_power: float) -> float:
@@ -337,7 +366,7 @@ def run_rl_optimization(
     W_sum = torch.sum(W)
     W_scaled = W / W_sum if W_sum > 0 else W
     primary_mask = torch.tensor(cfg.PRIMARY_ENDPOINTS, dtype=cfg.DTYPE, device=device)
-    cov_matrix = gMCP.create_covariance_matrix(m=m, corr_type=cfg.CORR_TYPE, rho=cfg.CORR_RHO)
+    cov_matrix = _covariance_matrix_from_config(m=m, corr_type=cfg.CORR_TYPE, corr_rho=cfg.CORR_RHO, corr_matrix=cfg.CORR_MATRIX)
     alpha_weight_fix_tensor = (
         torch.tensor(cfg.ALPHA_WEIGHT_FIX, dtype=cfg.DTYPE, device=device) if cfg.ALPHA_WEIGHT_FIX is not None else None
     )
@@ -486,7 +515,7 @@ def run_monte_carlo_evaluation(
     W_sum = torch.sum(W)
     W_scaled = W / W_sum if W_sum > 0 else W
     primary_mask = torch.tensor(cfg.PRIMARY_ENDPOINTS, dtype=cfg.DTYPE, device=device)
-    cov_matrix = gMCP.create_covariance_matrix(m=m, corr_type=cfg.CORR_TYPE, rho=cfg.CORR_RHO)
+    cov_matrix = _covariance_matrix_from_config(m=m, corr_type=cfg.CORR_TYPE, corr_rho=cfg.CORR_RHO, corr_matrix=cfg.CORR_MATRIX)
 
     alpha_weight_t = torch.tensor(graph.alpha_weight, dtype=cfg.DTYPE, device=device)
     t_t = torch.tensor(graph.transition_matrix, dtype=cfg.DTYPE, device=device)

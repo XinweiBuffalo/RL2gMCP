@@ -122,10 +122,9 @@ class Agent(nn.Module):
         entropy = entropy_alpha + entropy_T
 
         # --- Section 4: Final post-processing for T matrix (safety checks) ---
+        # Do not row-normalize here: process_T_matrix already enforces valid rows,
+        # and normalization would rescale user-fixed constraints (e.g., 0.2, 0.5).
         T_sample = T_sample_raw.clone()
-        T_sample.fill_diagonal_(0.0) # Ensure diagonal is exactly zero
-        row_sums = T_sample.sum(dim=1, keepdim=True)
-        row_sums[row_sums < 1e-9] = 1.0 # Avoid division by zero
-        T_sample = T_sample / row_sums
+        T_sample.fill_diagonal_(0.0)  # Ensure diagonal is exactly zero
 
         return alpha_weight, T_sample, log_prob, entropy
